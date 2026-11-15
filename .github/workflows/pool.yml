@@ -2,7 +2,16 @@ name: proxy-pool-refresh
 on:
   schedule:
     - cron: '*/15 * * * *'   # 每 15 分钟一轮
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      op:
+        description: 'full=抓取+验证 | check_only=仅验证测速 | recheck=单条重测'
+        default: 'full'
+        type: string
+      addr:
+        description: 'recheck 模式: 单条代理地址 ip:port'
+        default: ''
+        type: string
 concurrency:
   group: pool-refresh
   cancel-in-progress: true
@@ -20,9 +29,33 @@ jobs:
           python-version: '3.12'
       - run: pip install requests
       - name: 抓取代理源
+        if: ${{ inputs.op != 'check_only' && inputs.op != 'recheck' }}
         run: python run.py scrape
       - name: 验证一轮 (TCP→HTTP→测速→匿名度)
+        if: ${{ inputs.op != 'recheck' }}
         run: python run.py check 1
+      - name: 单条重测 (协议自动探测)
+        if: ${{ inputs.op == 'recheck' && inputs.addr != '' }}
+        env:
+          ADDR: ${{ inputs.addr }}
+        run: |
+          python - <<'PY'
+          import os
+          from core import DB
+          from checker import check_one_manual
+          a = os.environ['ADDR']
+          ip, port = a.rsplit(':', 1)
+          db = DB()
+          r = None
+          for proto in ('http', 'socks5', 'socks4'):
+              db.conn.execute('DELETE FROM proxies WHERE addr=?', (a,))
+              db.insert_proxies([{'addr': a, 'ip': ip, 'port': int(port),
+                                  'protocol': proto, 'source': 'manual'}])
+              r = check_one_manual(db, a)
+              if r and r.get('alive'):
+                  break
+          print('重测结果:', r)
+          PY
       - name: 灌入 Cloudflare KV
         env:
           CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
