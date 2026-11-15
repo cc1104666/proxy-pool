@@ -72,6 +72,12 @@ def main():
     db = sqlite3.connect(DB_PATH)
     db.row_factory = sqlite3.Row
 
+    total_all = db.execute('SELECT COUNT(*) FROM proxies').fetchone()[0]
+    if total_all == 0:
+        # check_only/recheck 冷启动轮(未抓取+恢复失败): 空库 → 跳过导出, 保护 KV
+        print('空库 → 跳过导出 (保护 KV 现有数据)')
+        return
+
     stats_p, last_alive_max = {}, ''
     for proto in PROTOS:
         rows = db.execute(SELECT_FULL, (proto, PER_PROTO_CAP)).fetchall()
