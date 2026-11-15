@@ -182,12 +182,20 @@ class DB:
             return self.conn.execute('SELECT COUNT(*) FROM proxies').fetchone()[0]
 
     def pick_workload(self):
-        """优先级: 未测试 > 存活过期 > 失败库全量轮扫(按失败次数少优先, 永不停止)"""
+        """优先级: 未测试 > 存活过期 > 失败库全量轮扫(按失败次数少优先, 永不停止)
+        云档(POOL_CLOUD=1): 按协议均衡配额, 避免单协议霸占整轮"""
         with self.lock:
             now = now_ts()
-            rows = self.conn.execute(
-                'SELECT addr,ip,port,protocol FROM proxies WHERE check_count=0'
-                ' ORDER BY created_ts LIMIT ?', (ROUND_CAP,)).fetchall()
+            if os.environ.get('POOL_CLOUD') == '1':
+                rows = []
+                for _p in ('http', 'https', 'socks4', 'socks5'):
+                    rows += self.conn.execute(
+                        'SELECT addr,ip,port,protocol FROM proxies WHERE protocol=? AND check_count=0'
+                        ' ORDER BY created_ts LIMIT ?', (_p, ROUND_CAP // 4)).fetchall()
+            else:
+                rows = self.conn.execute(
+                    'SELECT addr,ip,port,protocol FROM proxies WHERE check_count=0'
+                    ' ORDER BY created_ts LIMIT ?', (ROUND_CAP,)).fetchall()
             if len(rows) < 500:
                 rows += self.conn.execute(
                     'SELECT addr,ip,port,protocol FROM proxies WHERE alive=1 AND ?-last_checked_ts > ?'
