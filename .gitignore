@@ -1,0 +1,13 @@
+__pycache__/
+proxies.db*
+p*.json
+exp.txt
+hacker*
+hk.json
+st.json
+cloudflare/.wrangler/
+client_example.py
+dash.html
+*.pyc
+gh_setup.py
+secrets_dispatch.py

@@ -1,0 +1,13 @@
+{
+  "name": "proxy-api",
+  "main": "worker.js",
+  "compatibility_date": "2025-01-01",
+  "kv_namespaces": [
+    { "binding": "POOL", "id": "3a2948490081435fba76948cbef90ba4" }
+  ],
+  "workers_dev": true,
+  "routes": [
+    { "pattern": "proxyfree.eu.cc/*", "zone_name": "proxyfree.eu.cc" }
+  ],
+  "observability": { "enabled": true }
+}

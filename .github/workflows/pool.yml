@@ -1,0 +1,30 @@
+name: proxy-pool-refresh
+on:
+  schedule:
+    - cron: '*/15 * * * *'   # 每 15 分钟一轮
+  workflow_dispatch: {}
+concurrency:
+  group: pool-refresh
+  cancel-in-progress: true
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 13
+    env:
+      POOL_CLOUD: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: 抓取代理源
+        run: python run.py scrape
+      - name: 验证一轮 (TCP→HTTP→测速→匿名度)
+        run: python run.py check 1
+      - name: 灌入 Cloudflare KV
+        env:
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          CF_KV_NS: ${{ secrets.CF_KV_NS }}
+          CF_TOKEN: ${{ secrets.CF_TOKEN }}
+        run: python export_kv.py
