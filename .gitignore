@@ -11,3 +11,8 @@ dash.html
 *.pyc
 gh_setup.py
 secrets_dispatch.py
+push_workflow.py
+push_all.py
+gh_setup.py
+secrets_dispatch.py
+push_*.py
