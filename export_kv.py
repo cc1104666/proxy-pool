@@ -55,6 +55,10 @@ def main():
     stats = dict(protocols=stats_p, total_alive=total_alive,
                  updated=time.strftime('%Y-%m-%d %H:%M:%S'), updated_ago=0)
     for proto, items in protocols.items():
+        if not items:
+            # 保护合并: 本轮该协议无存活 → 保留 KV 旧数据 (Actions 新库抓取有冷启动期)
+            print(f'  pool:{proto:6s} → 0 条 (本轮无存活, 保留旧值)')
+            continue
         kv_put(f'pool:{proto}', json.dumps(items, ensure_ascii=False))
         print(f'  pool:{proto:6s} → {len(items)} 条')
     kv_put('stats', json.dumps(stats, ensure_ascii=False))
