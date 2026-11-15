@@ -43,7 +43,8 @@ def _account_id():
 
 AID = _account_id()
 NS = os.environ.get('CF_KV_NS') or '3a2948490081435fba76948cbef90ba4'
-H = {'Authorization': f'Bearer {_token()}', 'Content-Type': 'application/json'}
+TOK = _token()
+H = {'Authorization': f'Bearer {TOK}', 'Content-Type': 'application/json'}
 
 def kv_put(key, value):
     url = f'https://api.cloudflare.com/client/v4/accounts/{AID}/storage/kv/namespaces/{NS}/values/{key}'
@@ -51,6 +52,15 @@ def kv_put(key, value):
     r = json.loads(urllib.request.urlopen(req, timeout=60).read())
     if not r.get('success'):
         raise RuntimeError(f'KV put {key}: {r}')
+
+def kv_get(key):
+    """读 KV 现值 (不存在返回 None)"""
+    url = f'https://api.cloudflare.com/client/v4/accounts/{AID}/storage/kv/namespaces/{NS}/values/{key}'
+    req = urllib.request.Request(url, headers={'Authorization': f'Bearer {TOK}'})
+    try:
+        return urllib.request.urlopen(req, timeout=30).read().decode('utf-8')
+    except Exception:
+        return None
 
 def get_my_ip():
     try:
@@ -113,16 +123,41 @@ def main():
                  scrape_log=scrape_log, val_errors=val_errors, total_alive=alive_all,
                  updated=time.strftime('%Y-%m-%d %H:%M:%S'), updated_ago=0)
 
+    # ---- 合并导出: 新数据 ∪ KV 现有存活 − 本轮验证失败 → 数据只增不减 ----
+    merged_counts = {}
     for proto in PROTOS:
-        rows = db.execute(SELECT_FULL, (proto, PER_PROTO_CAP)).fetchall()
-        if not rows:
-            # 保护合并: 本轮该协议无存活 → 保留 KV 旧数据 (Actions 新库冷启动期)
-            print(f'  pool:{proto:6s} → 0 条 (本轮无存活, 保留旧值)')
+        new_items = [to_item(r) for r in db.execute(SELECT_FULL, (proto, PER_PROTO_CAP)).fetchall()]
+        new_map = {x['addr']: x for x in new_items}
+        old_raw = kv_get(f'pool:{proto}')
+        old_map = {x['addr']: x for x in (json.loads(old_raw) if old_raw else [])}
+        # 本轮明确验证失败的 addr (Actions 独立库: alive=0 即本轮复测/探测结论)
+        dead = {r['addr'] for r in db.execute(
+            'SELECT addr FROM proxies WHERE protocol=? AND alive=0', (proto,))}
+        merged = dict(old_map)
+        merged.update(new_map)          # 新数据优先 (延迟/带宽等字段最新鲜)
+        for a in dead:                  # 本轮死掉的剔除 (无论新旧)
+            merged.pop(a, None)
+        items = sorted(merged.values(),
+                       key=lambda x: (x.get('latency_ms') is None, x.get('latency_ms') or 99999))
+        items = items[:PER_PROTO_CAP]
+        if not items:
+            if not old_map:
+                print(f'  pool:{proto:6s} → 0 条 (无新无旧, 跳过)')
+            else:
+                kv_put(f'pool:{proto}', json.dumps([], ensure_ascii=False))
+                print(f'  pool:{proto:6s} → 0 条 (全部失活, 清空)')
+            merged_counts[proto] = 0
+            stats_p[proto] = dict(alive=0, total=stats_p[proto]['total'])
             continue
-        kv_put(f'pool:{proto}', json.dumps([to_item(r) for r in rows], ensure_ascii=False))
-        print(f'  pool:{proto:6s} → {len(rows)} 条')
-    kv_put('stats', json.dumps(stats, ensure_ascii=False))
-    print(f'✓ KV 灌池完成: 存活 {alive_all}, 最近存活 {last_alive_max}')
+        kv_put(f'pool:{proto}', json.dumps(items, ensure_ascii=False))
+        merged_counts[proto] = len(items)
+        stats_p[proto] = dict(alive=len(items), total=max(stats_p[proto]['total'], len(items)))
+        print(f'  pool:{proto:6s} → {len(items)} 条 (本轮验证新{len(new_map)} 旧保留{len(items) - len(new_map)} 剔除失活{len(dead)})')
+    alive_merged = sum(merged_counts.values())
+    kv_put('stats', json.dumps(
+        {**stats, 'alive': alive_merged, 'total_alive': alive_merged,
+         'by': stats_p, 'protocols': stats_p}, ensure_ascii=False))
+    print(f'✓ KV 灌池完成 (合并口径): 存活 {alive_merged}')
 
 if __name__ == '__main__':
     main()
