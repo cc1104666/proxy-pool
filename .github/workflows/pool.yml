@@ -22,12 +22,18 @@ jobs:
     timeout-minutes: 13
     env:
       POOL_CLOUD: "1"
+      CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+      CF_KV_NS: ${{ secrets.CF_KV_NS }}
+      CF_TOKEN: ${{ secrets.CF_TOKEN }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
       - run: pip install requests
+      - name: 恢复上轮数据 (check_only/recheck 模式)
+        if: ${{ inputs.op == 'check_only' || inputs.op == 'recheck' }}
+        run: python kv_restore.py
       - name: 抓取代理源
         if: ${{ inputs.op != 'check_only' && inputs.op != 'recheck' }}
         run: python run.py scrape
@@ -57,8 +63,4 @@ jobs:
           print('重测结果:', r)
           PY
       - name: 灌入 Cloudflare KV
-        env:
-          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
-          CF_KV_NS: ${{ secrets.CF_KV_NS }}
-          CF_TOKEN: ${{ secrets.CF_TOKEN }}
         run: python export_kv.py
