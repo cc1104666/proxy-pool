@@ -94,13 +94,17 @@ def main():
     scrape_log = [dict(ts=r['ts'], source=r['source'], found=r['found'], new=r['new'])
                   for r in db.execute('SELECT ts, source, found, new FROM scrape_log ORDER BY ts DESC LIMIT 14')]
     meta = {r['key']: r['value'] for r in db.execute("SELECT key, value FROM meta WHERE key='last_check_round'")}
+    val_errors = [dict(err=(r['last_error'] or '?')[:80], n=r['n'])
+                  for r in db.execute("""SELECT last_error, COUNT(*) AS n FROM proxies
+                                         WHERE last_error IS NOT NULL AND last_error != ''
+                                         GROUP BY last_error ORDER BY n DESC LIMIT 5""")]
 
     stats = dict(protocols=stats_p, total=total_all, alive=alive_all, by=stats_p,
                  untested=untested, avg_latency_ms=round(avg_lat) if avg_lat else None,
                  best_speed=best_speed, my_ip=get_my_ip(),
                  last_scrape=scrape_log[0]['ts'] if scrape_log else None,
                  last_check_round=meta.get('last_check_round'),
-                 scrape_log=scrape_log, total_alive=alive_all,
+                 scrape_log=scrape_log, val_errors=val_errors, total_alive=alive_all,
                  updated=time.strftime('%Y-%m-%d %H:%M:%S'), updated_ago=0)
 
     for proto in PROTOS:
